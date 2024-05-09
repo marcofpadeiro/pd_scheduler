@@ -7,6 +7,7 @@ pub struct TimeRange {
     pub end: NaiveTime,
 }
 
+#[allow(dead_code)]
 impl TimeRange {
     /// Creates a new `TimeRange` from the start and end times.
     ///
@@ -119,6 +120,47 @@ impl fmt::Display for TimeRange {
             "{}-{}",
             self.start.format("%H:%M"),
             self.end.format("%H:%M")
+        )
+    }
+}
+
+#[allow(dead_code)]
+pub enum MonthYear {
+    Month,
+    Year,
+}
+
+impl MonthYear {
+    #[allow(dead_code)]
+    pub fn validate(&self, val: u32) -> Result<u32, ()> {
+        match *self {
+            MonthYear::Month => {
+                if (1..=12).contains(&val) {
+                    Ok(val)
+                } else {
+                    Err(())
+                }
+            }
+            MonthYear::Year => {
+                if (2000..=3000).contains(&val) {
+                    Ok(val)
+                } else {
+                    Err(())
+                }
+            }
+        }
+    }
+}
+
+impl fmt::Display for MonthYear {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                MonthYear::Year => "year",
+                MonthYear::Month => "month",
+            }
         )
     }
 }
