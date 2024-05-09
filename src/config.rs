@@ -10,7 +10,7 @@ impl Action {
         match string.as_str() {
             "setup" => Self::Setup,
             "search" => Self::Search,
-            "sche" => Self::Schedule,
+            "schedule" => Self::Schedule,
             "help" => Self::Help,
             _ => Self::Help,
         }
@@ -25,12 +25,12 @@ pub struct Config {
 impl Config {
     pub fn build(mut args: impl Iterator<Item = String>) -> Config {
         args.next();
+
         let action = Action::new(args.next().unwrap_or_else(|| String::from("help")));
-        let args = if args.by_ref().peekable().peek().is_none() {
-            None
-        } else {
-            Some(args.collect())
-        };
+
+        let args = args.collect::<Vec<String>>();
+
+        let args = if args.is_empty() { None } else { Some(args) };
 
         Config { action, args }
     }
