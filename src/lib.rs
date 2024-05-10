@@ -1,9 +1,26 @@
 mod code;
-use chrono::{Datelike, Local, NaiveDate, Weekday};
+pub mod config;
 
-use crate::code::{MonthYear, TimeRange};
+use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveDateTime, TimeZone, Weekday};
+use chrono_tz::Europe::Lisbon;
+use code::TimeRange;
+
+use crate::config::Config;
+
 use std::collections::HashMap;
+use std::default::Default;
+use std::error::Error;
 use std::io::{self, Write};
+
+use crate::code::MonthYear;
+
+use google_calendar3::{
+    api::{Event, EventDateTime},
+    CalendarHub,
+};
+use hyper::Client;
+use hyper_rustls::HttpsConnector;
+use yup_oauth2::{read_application_secret, InstalledFlowAuthenticator, InstalledFlowReturnMethod};
 
 pub fn search(mut codes: Option<Vec<String>>) {
     let mut valid_input = false;
@@ -53,26 +70,98 @@ pub fn help() {
     println!("Usage: ./pd_scheduler <action> [args]");
     println!("Possible Actions:");
 
-    println!("\tsetup - To setup your Google Calendar account");
     println!("\tsearch - To lookup schedule codes");
     println!("\tschedule - To create events for a month");
     println!("\thelp - Display this menu ");
 }
 
-pub fn setup() {
-    todo!()
-}
+pub async fn schedule(config: &Config) {
+    let hub = auth().await.unwrap();
 
-pub fn schedule() {
     let current_date = Local::now();
-    let month = get_date(current_date.month(), MonthYear::Month);
-    let year = get_date(u32::try_from(current_date.year()).unwrap(), MonthYear::Year);
+    let month = get_month_year(current_date.month(), MonthYear::Month);
+    let year = get_month_year(u32::try_from(current_date.year()).unwrap(), MonthYear::Year);
+    let weekends = get_weekends(month, year);
+    let mut map: HashMap<u32, TimeRange> = HashMap::new();
 
-    println!("{}/{}", month, year);
-    println!("{:?}", get_weekends(month, year));
+    weekends.iter().for_each(|day| loop {
+        print!("{day}: ");
+        io::stdout().flush().unwrap();
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).unwrap();
+
+        if input.trim().is_empty() {
+            return;
+        }
+        if let Some(x) = TimeRange::find_code(input.trim()) {
+            map.insert(*day, x);
+            return;
+        }
+    });
+
+    for (day, time_range) in map.iter() {
+        println!("Adding {} as {}", day, time_range);
+        let naive_date = NaiveDate::from_ymd_opt(year as i32, month, *day).unwrap();
+
+        let start = NaiveDateTime::new(naive_date, time_range.start);
+        let end = NaiveDateTime::new(naive_date, time_range.end);
+
+        let start_datetime: DateTime<chrono_tz::Tz> = Lisbon.from_utc_datetime(&start);
+        let end_datetime: DateTime<chrono_tz::Tz> = Lisbon.from_utc_datetime(&end);
+
+        let start_time = start_datetime.to_rfc3339();
+        let end_time = end_datetime.to_rfc3339();
+
+        add_event(config, &hub, start_time, end_time).await.unwrap();
+    }
 }
 
-fn get_date(val: u32, month_year: MonthYear) -> u32 {
+async fn auth() -> Result<CalendarHub, Box<dyn Error>> {
+    let secret = read_application_secret("client_secret.json").await?;
+
+    let auth = InstalledFlowAuthenticator::builder(secret, InstalledFlowReturnMethod::Interactive)
+        .persist_tokens_to_disk("tokencache.json")
+        .build()
+        .await?;
+
+    let client = Client::builder().build::<_, hyper::Body>(HttpsConnector::with_native_roots());
+
+    Ok(CalendarHub::new(client, auth))
+}
+
+async fn add_event(
+    config: &Config,
+    hub: &CalendarHub,
+    start: String,
+    end: String,
+) -> Result<(), Box<dyn Error>> {
+    let event = Event {
+        summary: Some(config.event_name.clone().into()),
+        location: Some(config.address.clone().into()),
+        start: Some(EventDateTime {
+            date_time: Some(start.into()),
+            time_zone: Some(config.timezone.clone().into()),
+            ..Default::default()
+        }),
+        end: Some(EventDateTime {
+            date_time: Some(end.into()),
+            time_zone: Some(config.timezone.clone().into()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let calendar_id = config.calendar_id.as_str();
+
+    let result = hub.events().insert(event, calendar_id).doit().await;
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => Err(Box::new(e)),
+    }
+}
+
+fn get_month_year(val: u32, month_year: MonthYear) -> u32 {
     loop {
         print!("Enter the {} (default: {}): ", month_year, val);
         io::stdout().flush().unwrap();

@@ -1,18 +1,16 @@
-mod code;
-mod config;
+pub mod code;
 
-use config::Action;
-use config::Config;
-use pd_scheduler::{help, schedule, search, setup};
+use pd_scheduler::config::{Action, Config};
+use pd_scheduler::{help, schedule, search};
 use std::env;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let config = Config::build(env::args());
 
-    match config.action {
-        Action::Schedule => schedule(),
+    match config.action.as_ref().unwrap() {
+        Action::Schedule => schedule(&config).await,
         Action::Search => search(config.args),
-        Action::Setup => setup(),
         _ => help(),
     }
 }
